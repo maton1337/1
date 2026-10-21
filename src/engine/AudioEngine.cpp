@@ -249,20 +249,25 @@ AudioEngine::Status AudioEngine::getStatus() const
     s.sampleRate = outputDevice->getCurrentSampleRate();
     s.blockSize  = outputDevice->getCurrentBufferSizeSamples();
 
-    double latency = outputDevice->getOutputLatencyInSamples() + s.pluginLatency;
+    const auto toMs = [] (double samples, double rate) { return rate > 0.0 ? samples * 1000.0 / rate : 0.0; };
+
+    // Each device adds its own buffer plus whatever latency its driver reports.
+    s.outputDeviceMs = toMs (outputDevice->getOutputLatencyInSamples() + s.blockSize, s.sampleRate);
+    s.pluginMs = toMs (s.pluginLatency, s.sampleRate);
 
     if (inputDevice != nullptr)
     {
+        const auto inRate = inputDevice->getCurrentSampleRate();
         s.bridge = bridge.getStats();
-        latency += inputDevice->getInputLatencyInSamples() * s.sampleRate / inputDevice->getCurrentSampleRate();
-        latency += s.bridge.targetFrames;
+        s.inputDeviceMs = toMs (inputDevice->getInputLatencyInSamples() + inputDevice->getCurrentBufferSizeSamples(), inRate);
+        s.bridgeMs = s.bridge.latencyMs;
     }
     else
     {
-        latency += outputDevice->getInputLatencyInSamples();
+        s.inputDeviceMs = toMs (outputDevice->getInputLatencyInSamples(), s.sampleRate);
     }
 
-    s.totalLatencyMs = s.sampleRate > 0 ? latency * 1000.0 / s.sampleRate : 0.0;
+    s.totalLatencyMs = s.inputDeviceMs + s.bridgeMs + s.pluginMs + s.outputDeviceMs;
     return s;
 }
 

@@ -49,7 +49,7 @@ private:
     double sampleRate = 48000.0;
     int blockSize = 512;
     bool prepared = false;
-    bool compensate = true;
+    bool compensate = false;
 
     std::vector<const float*> inputChunk;
     std::vector<float*> outputChunk;

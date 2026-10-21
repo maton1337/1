@@ -5,7 +5,7 @@
 #include "engine/Session.h"
 #include "LookAndFeel.h"
 #include "PluginWindows.h"
-#include "RackRow.h"
+#include "ChannelStrip.h"
 
 namespace bridgerack
 {
@@ -32,7 +32,8 @@ private:
     void showAddRackMenu();
     void rebuildRows();
     void refreshRows();
-    RackRow* findRow (const Rack&) const;
+    void addDefaultRacks();
+    void removeRack (Rack&);
 
     void showPluginChooser (Rack&, int slot);
     void loadPlugin (Rack&, int slot, const juce::PluginDescription&);
@@ -40,6 +41,8 @@ private:
     void showRackMenu (Rack&);
     void openRouting (Rack&, bool input);
     void duplicateRack (Rack&);
+    void copySlot (Rack&, int slot);
+    void pasteSlot (Rack&, int slot);
 
     void dispose (std::unique_ptr<juce::AudioProcessor>);
     void disposeRack (std::unique_ptr<Rack>);
@@ -79,7 +82,16 @@ private:
     PluginHost host;
     PluginWindowManager editors;
     SnapshotBank snapshots;
-    RackRowCallbacks rowCallbacks;
+    StripCallbacks rowCallbacks;
+
+    /** A copied insert: which plugin and its settings. */
+    struct SlotClipboard
+    {
+        juce::PluginDescription description;
+        juce::MemoryBlock state;
+        bool bypassed = false;
+        bool valid = false;
+    } clipboard;
     juce::File sessionFile;
 
     juce::TextButton sessionButton { "Session" }, devicesButton { "Audio I/O" }, pluginsButton { "Plugins" },
@@ -92,7 +104,7 @@ private:
 
     juce::Viewport viewport;
     juce::Component rackContainer;
-    juce::OwnedArray<RackRow> rows;
+    juce::OwnedArray<ChannelStrip> rows;
 
     std::unique_ptr<juce::DocumentWindow> deviceWindow, pluginListWindow;
     std::unique_ptr<juce::FileChooser> chooser;

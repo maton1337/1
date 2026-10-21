@@ -48,22 +48,7 @@ MainComponent::MainComponent (juce::ApplicationProperties& p)
     rowCallbacks.onMoveSlot = [this] (Rack& rack, int from, int to) { rack.moveSlot (from, to); refreshRows(); };
     rowCallbacks.onRouting = [this] (Rack& rack, bool input) { openRouting (rack, input); };
     rowCallbacks.onChannelsChanged = [this] (Rack& rack, int n) { rack.setNumChannels (n); refreshRows(); };
-    rowCallbacks.onSlotCountChanged = [this] (Rack&) { refreshRows(); };
     rowCallbacks.onRackMenu = [this] (Rack& rack) { showRackMenu (rack); };
-    rowCallbacks.onRemove = [this] (Rack& rack)
-    {
-        // Deferred: this can be called from inside the row being removed.
-        juce::MessageManager::callAsync ([this, r = &rack]
-        {
-            const auto index = engine.getRacks().indexOf (r);
-
-            if (index >= 0)
-            {
-                disposeRack (engine.getRacks().removeRack (index));
-                rebuildRows();
-            }
-        });
-    };
 
     sessionButton.onClick = [this] { showSessionMenu(); };
     devicesButton.onClick = [this] { showDeviceSetup(); };
@@ -73,7 +58,7 @@ MainComponent::MainComponent (juce::ApplicationProperties& p)
     sessionButton.setTooltip ("New, open and save sessions");
     devicesButton.setTooltip ("Choose input and output devices (they can be different, e.g. Dante in, USB out)");
     pluginsButton.setTooltip ("Scan for and manage VST3 / AU / VST2 plugins");
-    addRackButton.setTooltip ("Add a processing rack");
+    addRackButton.setTooltip ("Add a mono or stereo channel");
 
     alignButton.setTooltip ("Delay racks with less plugin latency so all rack outputs stay time-aligned");
     alignButton.onClick = [this] { engine.getRacks().setLatencyCompensation (alignButton.getToggleState()); };
@@ -122,12 +107,12 @@ MainComponent::MainComponent (juce::ApplicationProperties& p)
     openDevices (selection);
 
     if (! loadSession (getAutosaveFile(), false))
-        addRack (2);
+        addDefaultRacks();
 
     alignButton.setToggleState (engine.getRacks().isLatencyCompensationOn(), juce::dontSendNotification);
 
     setWantsKeyboardFocus (true);
-    setSize (1440, 760);
+    setSize (1280, 860);
     startTimerHz (30);
 }
 
@@ -144,7 +129,7 @@ MainComponent::~MainComponent()
 void MainComponent::addRack (int numChannels)
 {
     auto& racks = engine.getRacks();
-    auto& rack = racks.addRack (std::make_unique<Rack> ("Rack " + juce::String (racks.size() + 1), numChannels));
+    auto& rack = racks.addRack (std::make_unique<Rack> ("Ch " + juce::String (racks.size() + 1), numChannels));
 
     // Patch new racks after the channels the previous rack uses.
     if (auto* previous = racks.getRack (racks.size() - 2))
@@ -171,15 +156,42 @@ void MainComponent::addRack (int numChannels)
 void MainComponent::showAddRackMenu()
 {
     juce::PopupMenu menu;
-    menu.addSectionHeader ("New rack");
-
-    for (auto n : { 1, 2, 4, 6, 8, 16, 32, 64 })
-        menu.addItem (n, n == 1 ? "Mono" : n == 2 ? "Stereo" : n == 6 ? "6 channels (5.1)" : juce::String (n) + " channels");
+    menu.addSectionHeader ("New channel");
+    menu.addItem (1, "Mono");
+    menu.addItem (2, "Stereo");
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addRackButton), [this] (int result)
     {
         if (result > 0)
             addRack (result);
+    });
+}
+
+void MainComponent::addDefaultRacks()
+{
+    // A fresh session looks like a console: eight stereo channels on inputs/outputs 1-16.
+    for (int i = 0; i < 8; ++i)
+        engine.getRacks().addRack (std::make_unique<Rack> ("Ch " + juce::String (i + 1), 2))
+            .setInputMap ({ i * 2, i * 2 + 1 });
+
+    for (int i = 0; i < 8; ++i)
+        engine.getRacks().getRack (i)->setOutputMap ({ i * 2, i * 2 + 1 });
+
+    rebuildRows();
+}
+
+void MainComponent::removeRack (Rack& rack)
+{
+    // Deferred: this can be called from inside the strip being removed.
+    juce::MessageManager::callAsync ([this, r = &rack]
+    {
+        const auto index = engine.getRacks().indexOf (r);
+
+        if (index >= 0)
+        {
+            disposeRack (engine.getRacks().removeRack (index));
+            rebuildRows();
+        }
     });
 }
 
@@ -189,7 +201,7 @@ void MainComponent::rebuildRows()
     auto& racks = engine.getRacks();
 
     for (int i = 0; i < racks.size(); ++i)
-        rackContainer.addAndMakeVisible (rows.add (new RackRow (*racks.getRack (i), i, rowCallbacks)));
+        rackContainer.addAndMakeVisible (rows.add (new ChannelStrip (*racks.getRack (i), i, rowCallbacks)));
 
     resized();
 }
@@ -206,14 +218,6 @@ void MainComponent::refreshRows()
         row->refresh();
 }
 
-RackRow* MainComponent::findRow (const Rack& rack) const
-{
-    for (auto* row : rows)
-        if (&row->getRack() == &rack)
-            return row;
-
-    return nullptr;
-}
 
 //==============================================================================
 void MainComponent::showPluginChooser (Rack& rack, int slot)
@@ -271,26 +275,58 @@ void MainComponent::showSlotMenu (Rack& rack, int slot)
     auto* processor = rack.getProcessor (slot);
     juce::PopupMenu menu;
 
+    // "Copy to" targets: the same slot number on every other channel.
+    constexpr int copyToBase = 1000;
+    juce::PopupMenu copyTo;
+    auto& racks = engine.getRacks();
+
+    for (int i = 0; i < racks.size(); ++i)
+        if (auto* target = racks.getRack (i); target != &rack && slot < target->getNumSlots())
+            copyTo.addItem (copyToBase + i, juce::String (i + 1) + ". " + target->getName()
+                                                + (target->getProcessor (slot) != nullptr ? "  (replace "
+                                                       + target->getProcessor (slot)->getName() + ")" : juce::String()));
+
+    const auto pasteText = clipboard.valid ? "Paste " + clipboard.description.name : juce::String ("Paste");
+
     if (processor == nullptr)
     {
         menu.addItem (1, "Insert plugin...");
+        menu.addItem (9, pasteText, clipboard.valid);
     }
     else
     {
-        menu.addSectionHeader (processor->getName());
+        menu.addSectionHeader (processor->getName() + "  (latency " + juce::String (processor->getLatencySamples()) + " smp)");
         menu.addItem (2, "Open editor");
         menu.addItem (3, "Bypass", true, rack.isSlotBypassed (slot));
         menu.addItem (4, "Replace...");
         menu.addItem (5, "Remove");
         menu.addSeparator();
-        menu.addItem (6, "Move left", slot > 0);
-        menu.addItem (7, "Move right", slot < rack.getNumSlots() - 1);
+        menu.addItem (8, "Copy");
+        menu.addItem (9, pasteText + " (replace)", clipboard.valid);
+        menu.addSubMenu ("Copy to channel", copyTo, copyTo.getNumItems() > 0);
+        menu.addSeparator();
+        menu.addItem (6, "Move up", slot > 0);
+        menu.addItem (7, "Move down", slot < rack.getNumSlots() - 1);
     }
 
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(), [this, r = &rack, slot] (int result)
     {
         if (engine.getRacks().indexOf (r) < 0)
             return;
+
+        if (result >= copyToBase)
+        {
+            if (auto* target = engine.getRacks().getRack (result - copyToBase))
+            {
+                const auto saved = clipboard;
+                copySlot (*r, slot);
+                pasteSlot (*target, slot);
+                clipboard = saved;
+            }
+
+            refreshRows();
+            return;
+        }
 
         switch (result)
         {
@@ -300,11 +336,48 @@ void MainComponent::showSlotMenu (Rack& rack, int slot)
             case 5: dispose (r->removeProcessor (slot)); break;
             case 6: r->moveSlot (slot, slot - 1); break;
             case 7: r->moveSlot (slot, slot + 1); break;
+            case 8: copySlot (*r, slot); break;
+            case 9: pasteSlot (*r, slot); break;
             default: return;
         }
 
         refreshRows();
     });
+}
+
+void MainComponent::copySlot (Rack& rack, int slot)
+{
+    auto* processor = rack.getProcessor (slot);
+
+    if (processor == nullptr)
+        return;
+
+    clipboard.description = rack.getDescription (slot);
+    clipboard.state.reset();
+    processor->getStateInformation (clipboard.state);
+    clipboard.bypassed = rack.isSlotBypassed (slot);
+    clipboard.valid = true;
+}
+
+void MainComponent::pasteSlot (Rack& rack, int slot)
+{
+    if (! clipboard.valid)
+        return;
+
+    const auto& racks = engine.getRacks();
+    juce::String error;
+    auto instance = host.createInstance (clipboard.description, racks.getSampleRate(), racks.getBlockSize(), error);
+
+    if (instance == nullptr)
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Could not paste plugin",
+                                                clipboard.description.name + "\n\n" + error);
+        return;
+    }
+
+    dispose (rack.setProcessor (slot, std::move (instance), clipboard.description));
+    rack.setProcessorState (slot, clipboard.state);
+    rack.setSlotBypassed (slot, clipboard.bypassed);
 }
 
 void MainComponent::showRackMenu (Rack& rack)
@@ -313,14 +386,26 @@ void MainComponent::showRackMenu (Rack& rack)
     const auto index = racks.indexOf (&rack);
 
     juce::PopupMenu menu;
+    juce::PopupMenu colours;
+    constexpr int colourBase = 100;
+
+    for (int i = 0; i < 8; ++i)
+        colours.addColouredItem (colourBase + i, "Colour " + juce::String (i + 1), Colours::forChannel (i));
+
+    colours.addItem (colourBase + 99, "Automatic");
+
     menu.addSectionHeader (rack.getName());
     menu.addItem (1, "Rename...");
+    menu.addSubMenu ("Colour", colours);
     menu.addItem (2, "Duplicate");
-    menu.addItem (3, "Move up", index > 0);
-    menu.addItem (4, "Move down", index < racks.size() - 1);
+    menu.addItem (3, "Move left", index > 0);
+    menu.addItem (4, "Move right", index < racks.size() - 1);
+    menu.addSeparator();
+    menu.addItem (7, "Add insert slot", rack.getNumSlots() < kMaxSlots);
+    menu.addItem (8, "Remove last empty slot", rack.getNumSlots() > kMinSlots && rack.getProcessor (rack.getNumSlots() - 1) == nullptr);
     menu.addItem (5, "Remove all plugins");
     menu.addSeparator();
-    menu.addItem (6, "Remove rack");
+    menu.addItem (6, "Remove channel");
 
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(), [this, r = &rack] (int result)
     {
@@ -333,7 +418,7 @@ void MainComponent::showRackMenu (Rack& rack)
         switch (result)
         {
             case 1:
-                promptForText ("Rename rack", r->getName(), [this, r] (juce::String name)
+                promptForText ("Rename channel", r->getName(), [this, r] (juce::String name)
                 {
                     if (engine.getRacks().indexOf (r) >= 0 && name.isNotEmpty())
                     {
@@ -354,8 +439,17 @@ void MainComponent::showRackMenu (Rack& rack)
                 refreshRows();
                 break;
 
-            case 6: rowCallbacks.onRemove (*r); break;
-            default: break;
+            case 6: removeRack (*r); break;
+            case 7: r->setNumSlots (r->getNumSlots() + 1); refreshRows(); break;
+            case 8: r->setNumSlots (r->getNumSlots() - 1); refreshRows(); break;
+
+            default:
+                if (result >= colourBase)
+                {
+                    r->setColour (result == colourBase + 99 ? 0u : Colours::forChannel (result - colourBase).getARGB());
+                    refreshRows();
+                }
+                break;
         }
     });
 }
@@ -546,7 +640,7 @@ void MainComponent::newSession()
     engine.getRacks().removeAll();
     snapshots.clear();
     sessionFile = juce::File();
-    addRack (2);
+    addDefaultRacks();
     refreshSnapshots();
 }
 
@@ -745,14 +839,23 @@ void MainComponent::updateStatus()
         if (status.bridged)
         {
             const auto& b = status.bridge;
-            text << "Clock bridge: " << (b.locked ? "LOCKED " : "SYNCING ") << formatPpm (b.driftPpm)
-                 << "   buffer " << juce::String (b.latencyMs, 1) << " ms"
-                 << "   dropouts " << (b.underruns + b.overruns) << "      ";
+            text << "Bridge " << (b.locked ? "LOCKED " : "SYNCING ") << formatPpm (b.driftPpm)
+                 << ", drops " << (b.underruns + b.overruns) << "   |   ";
             colour = b.locked ? Colours::ok : Colours::warn;
         }
 
-        text << "CPU " << juce::roundToInt (status.cpuLoad * 100.0) << "%"
-             << "   total latency " << juce::String (status.totalLatencyMs, 1) << " ms";
+        // Where the latency comes from, so it is obvious what to change.
+        const auto ms = [] (double v) { return juce::String (v, 1); };
+        text << "CPU " << juce::roundToInt (status.cpuLoad * 100.0) << "%   |   "
+             << "Latency " << ms (status.totalLatencyMs) << " ms  (in " << ms (status.inputDeviceMs);
+
+        if (status.bridged)
+            text << " + bridge " << ms (status.bridgeMs);
+
+        text << " + inserts " << ms (status.pluginMs) << " + out " << ms (status.outputDeviceMs) << ")";
+
+        if (status.pluginMs > 5.0 && colour == Colours::text)
+            colour = Colours::warn;
 
         if (status.cpuLoad > 0.8)
             colour = Colours::bad;
@@ -813,16 +916,21 @@ void MainComponent::resized()
     snapshotLabel.setBounds (top.removeFromRight (70));
 
     auto statusBar = area.removeFromTop (28).reduced (10, 2);
-    statusLabel.setBounds (statusBar.removeFromRight (statusBar.getWidth() / 2));
+    statusLabel.setBounds (statusBar.removeFromRight (statusBar.getWidth() * 3 / 5));
     ioLabel.setBounds (statusBar);
 
     viewport.setBounds (area.reduced (0, 4));
 
-    const auto width = juce::jmax (viewport.getMaximumVisibleWidth(), 1280);
-    rackContainer.setSize (width, juce::jmax (1, rows.size() * RackRow::height + 8));
+    // Channel strips side by side, like a console surface.
+    int height = viewport.getMaximumVisibleHeight();
+
+    for (auto* strip : rows)
+        height = juce::jmax (height, strip->getMinimumHeight());
+
+    rackContainer.setSize (juce::jmax (viewport.getMaximumVisibleWidth(), rows.size() * ChannelStrip::width + 8), height);
 
     for (int i = 0; i < rows.size(); ++i)
-        rows[i]->setBounds (0, 4 + i * RackRow::height, width, RackRow::height);
+        rows[i]->setBounds (4 + i * ChannelStrip::width, 0, ChannelStrip::width, height);
 }
 
 } // namespace bridgerack

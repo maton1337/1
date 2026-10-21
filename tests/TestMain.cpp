@@ -299,8 +299,11 @@ void testRouting()
     racks.process (bigIn.getArrayOfReadPointers(), 3, bigOut.getArrayOfWritePointers(), 2, 200);
     check (juce::approximatelyEqual (bigOut.getSample (1, 199), 4.0f), "oversized blocks are processed in chunks");
 
+    b.setNumChannels (2);
+    check (b.getInputMap() == std::vector<int> { 2, 3 }, "mono -> stereo extends routing sequentially");
+
     a.setNumChannels (8);
-    check (a.getInputMap().size() == 8 && a.getInputMap()[7] == 7, "channel count change extends routing sequentially");
+    check (a.getNumChannels() == 2, "racks are limited to stereo");
 }
 
 void testLatencyCompensation()
@@ -315,7 +318,7 @@ void testLatencyCompensation()
     slow.setProcessor (0, std::make_unique<DelayProcessor> (100), describe ("Delay"));
     slow.setOutputMap ({ 0 });
     fast.setOutputMap ({ 1 });
-    racks.updateLatencyCompensation();
+    racks.setLatencyCompensation (true);
 
     check (fast.getCompensationDelay() == 100 && slow.getCompensationDelay() == 0, "faster rack is delayed by 100 samples");
 

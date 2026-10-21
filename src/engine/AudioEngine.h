@@ -68,6 +68,7 @@ public:
         double cpuLoad = 0.0;               // 0..1, share of the block period spent processing
         int pluginLatency = 0;              // aligned rack latency, samples
         double totalLatencyMs = 0.0;        // device in + bridge + plugins + device out
+        double inputDeviceMs = 0.0, bridgeMs = 0.0, pluginMs = 0.0, outputDeviceMs = 0.0;
         ClockBridge::Stats bridge;
         juce::String lastError;
     };

@@ -101,7 +101,7 @@ if(BRIDGERACK_BUILD_APP)
         src/ui/LookAndFeel.cpp
         src/ui/MainComponent.cpp
         src/ui/PluginWindows.cpp
-        src/ui/RackRow.cpp
+        src/ui/ChannelStrip.cpp
         src/ui/RoutingMatrix.cpp)
 
     target_compile_definitions(BridgeRack PRIVATE

@@ -49,7 +49,7 @@ namespace
 
 Rack::Rack (juce::String n, int channels, int numSlots)
     : name (std::move (n)),
-      numChannels (juce::jlimit (1, kMaxRackChannels, channels))
+      numChannels (juce::jlimit (1, kMaxChannelsPerRack, channels))
 {
     slots.resize ((size_t) juce::jlimit (kMinSlots, kMaxSlots, numSlots));
     inputMap  = sequentialMap (numChannels);
@@ -124,7 +124,7 @@ void Rack::configureProcessor (juce::AudioProcessor& p) const
 //==============================================================================
 void Rack::setNumChannels (int newNumChannels)
 {
-    newNumChannels = juce::jlimit (1, kMaxRackChannels, newNumChannels);
+    newNumChannels = juce::jlimit (1, kMaxChannelsPerRack, newNumChannels);
 
     const juce::ScopedLock sl (lock);
 
@@ -431,6 +431,7 @@ juce::ValueTree Rack::toValueTree() const
         .setProperty ("channels", numChannels, nullptr)
         .setProperty ("inputGainDb", inputGainDb, nullptr)
         .setProperty ("outputGainDb", outputGainDb, nullptr)
+        .setProperty ("colour", (juce::int64) colour, nullptr)
         .setProperty ("muted", muted.load(), nullptr)
         .setProperty ("bypassed", bypassed.load(), nullptr)
         .setProperty ("inputMap", mapToString (inputMap), nullptr)

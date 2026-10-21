@@ -105,6 +105,7 @@ juce::StringArray applyRack (const juce::ValueTree& rackTree, Rack& rack, const 
     rack.setOutputMap (parseMap (rackTree.getProperty ("outputMap")));
     rack.setInputGainDb (rackTree.getProperty ("inputGainDb", 0.0f));
     rack.setOutputGainDb (rackTree.getProperty ("outputGainDb", 0.0f));
+    rack.setColour ((juce::uint32) (juce::int64) rackTree.getProperty ("colour", 0));
     rack.setMuted (rackTree.getProperty ("muted", false));
     rack.setBypassed (rackTree.getProperty ("bypassed", false));
 
@@ -138,7 +139,7 @@ juce::StringArray applyRacks (const juce::ValueTree& racksTree, RackSet& racks, 
     juce::StringArray errors;
     int numRacks = 0;
 
-    racks.setLatencyCompensation (racksTree.getProperty ("latencyCompensation", true));
+    racks.setLatencyCompensation (racksTree.getProperty ("latencyCompensation", false));
 
     for (const auto& rackTree : racksTree)
     {

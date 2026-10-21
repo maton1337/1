@@ -13,7 +13,8 @@ namespace bridgerack
 constexpr int kMinSlots        = 4;
 constexpr int kDefaultSlots    = 8;
 constexpr int kMaxSlots        = 16;
-constexpr int kMaxRackChannels = 64;
+constexpr int kMaxRackChannels = 64;       // buffer capacity
+constexpr int kMaxChannelsPerRack = 2;     // racks are mono or stereo, like console channels
 constexpr int kMaxCompensation = 1 << 16;   // samples of delay a rack can add for PDC
 
 /**
@@ -40,6 +41,7 @@ public:
     void setName (const juce::String& n)         { name = n; }
 
     int getNumChannels() const noexcept          { return numChannels; }
+    double getSampleRate() const noexcept        { return sampleRate; }
     void setNumChannels (int newNumChannels);
 
     int getNumSlots() const noexcept             { return (int) slots.size(); }
@@ -78,6 +80,10 @@ public:
     float getInputGainDb() const noexcept        { return inputGainDb; }
     void setOutputGainDb (float);
     float getOutputGainDb() const noexcept       { return outputGainDb; }
+
+    /** Strip colour as ARGB; 0 means "pick automatically". */
+    void setColour (juce::uint32 argb) noexcept  { colour = argb; }
+    juce::uint32 getColour() const noexcept      { return colour; }
 
     void setMuted (bool m) noexcept              { muted = m; }
     bool isMuted() const noexcept                { return muted; }
@@ -129,6 +135,7 @@ private:
     std::vector<int> inputMap, outputMap;
 
     float inputGainDb = 0.0f, outputGainDb = 0.0f;
+    juce::uint32 colour = 0;
     std::atomic<float> inputGain { 1.0f }, outputGain { 1.0f };
     std::atomic<bool> muted { false }, bypassed { false };
 
