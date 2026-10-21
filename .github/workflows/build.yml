@@ -1,0 +1,58 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (universal arm64 + x86_64)
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: cmake --build build --config Release -j 4
+
+      - name: Engine tests
+        run: ./build/BridgeRackTests
+
+      - name: Package
+        run: |
+          APP=build/BridgeRack_artefacts/Release/BridgeRack.app
+          # Ad-hoc signature so the bundle runs on Apple Silicon; not notarised.
+          codesign --force --deep --sign - "$APP"
+          mkdir -p dist
+          ditto -c -k --keepParent "$APP" dist/BridgeRack-macOS.zip
+          hdiutil create -volname BridgeRack -srcfolder "$APP" -ov -format UDZO dist/BridgeRack-macOS.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BridgeRack-macOS
+          path: dist/*
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libasound2-dev libjack-jackd2-dev libfreetype-dev \
+            libfontconfig1-dev libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev libgl1-mesa-dev libegl-dev
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+      - name: Engine tests
+        run: ./build/BridgeRackTests
