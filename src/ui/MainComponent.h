@@ -67,6 +67,8 @@ private:
     void showDeviceSetup();
     void showPluginManager();
     juce::String openDevices (const DeviceSelection&);
+    void checkMicrophonePermission();
+    void showMicrophoneDenied();
     DeviceSelection defaultSelection() const;
     juce::File getAutosaveFile() const;
 
@@ -110,6 +112,7 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TooltipWindow tooltips { this, 700 };
     int ticks = 0;
+    double lastInputSignalMs = 0.0;
 };
 
 } // namespace bridgerack

@@ -27,7 +27,11 @@ jobs:
         run: |
           APP=build/BridgeRack_artefacts/Release/BridgeRack.app
           # Ad-hoc signature so the bundle runs on Apple Silicon; not notarised.
-          codesign --force --deep --sign - "$APP"
+          # The designated requirement names only the bundle ID, so macOS keeps the
+          # microphone permission across updates instead of tying it to one build's hash.
+          codesign --force --sign - --identifier org.bridgerack.app \
+            --requirements '=designated => identifier "org.bridgerack.app"' "$APP"
+          codesign --display --requirements - "$APP"
           mkdir -p dist
           ditto -c -k --keepParent "$APP" dist/BridgeRack-macOS.zip
           cp build/BridgeRackProbe dist/

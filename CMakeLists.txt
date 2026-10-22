@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(BridgeRack VERSION 0.1.0 LANGUAGES C CXX)
+project(BridgeRack VERSION 0.3.0 LANGUAGES C CXX)
+
+if(APPLE)
+    enable_language(OBJC OBJCXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -92,6 +96,7 @@ if(BRIDGERACK_BUILD_APP)
         PRODUCT_NAME                  "BridgeRack"
         COMPANY_NAME                  "BridgeRack"
         BUNDLE_ID                     "org.bridgerack.app"
+        ICON_BIG                      "${CMAKE_CURRENT_SOURCE_DIR}/resources/icon.png"
         VERSION                       ${PROJECT_VERSION}
         MICROPHONE_PERMISSION_ENABLED TRUE
         MICROPHONE_PERMISSION_TEXT    "BridgeRack needs audio input access to process incoming signals.")
@@ -105,6 +110,13 @@ if(BRIDGERACK_BUILD_APP)
         src/ui/PluginWindows.cpp
         src/ui/ChannelStrip.cpp
         src/ui/RoutingMatrix.cpp)
+
+    if(APPLE)
+        target_sources(BridgeRack PRIVATE src/platform/MicPermission.mm)
+        target_link_libraries(BridgeRack PRIVATE "-framework AVFoundation")
+    else()
+        target_sources(BridgeRack PRIVATE src/platform/MicPermission.cpp)
+    endif()
 
     target_compile_definitions(BridgeRack PRIVATE
         JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:BridgeRack,JUCE_PRODUCT_NAME>"

@@ -1,7 +1,9 @@
 // Headless tests for the BridgeRack engine: clock bridging, rack routing,
 // latency compensation and session/snapshot state.
 
+#include "engine/AudioEngine.h"
 #include "engine/ClockBridge.h"
+#include "FakeDevices.h"
 #include "engine/RackSet.h"
 #include "engine/Session.h"
 
@@ -441,8 +443,53 @@ void testSessionAndSnapshots()
 }
 }
 
+void testEndToEnd (const juce::String& inputDevice, const juce::String& outputDevice, double seconds)
+{
+    std::printf ("AudioEngine end to end: %s -> %s, real-time threads for %.0f s\n",
+                 inputDevice.toRawUTF8(), outputDevice.toRawUTF8(), seconds);
+
+    AudioEngine engine;
+    auto fakeType = std::make_unique<test::FakeDeviceType>();
+    auto* fake = fakeType.get();
+    engine.addDeviceType (std::move (fakeType));
+
+    auto& rack = engine.getRacks().addRack (std::make_unique<Rack> ("Ch 1", 2));
+    rack.setInputMap ({ 0, 1 });
+    rack.setOutputMap ({ 0, 1 });
+
+    DeviceSelection sel;
+    sel.inputType = sel.outputType = "Fake";
+    sel.inputDevice = inputDevice;
+    sel.outputDevice = outputDevice;
+    sel.inputBlockSize = sel.outputBlockSize = 256;
+
+    const auto error = engine.open (sel);
+    check (error.isEmpty(), "devices open" + (error.isEmpty() ? juce::String() : ": " + error));
+
+    // Let the bridge lock, then look at what actually reaches the output device.
+    juce::Thread::sleep (1500);
+
+    for (int ch = 0; ch < 2; ++ch)
+        fake->last->takeOutputPeak (ch);
+
+    juce::Thread::sleep ((int) (seconds * 1000.0) - 1500);
+    const auto left = fake->last->takeOutputPeak (0), right = fake->last->takeOutputPeak (1);
+    const auto status = engine.getStatus();
+
+    check (left > 0.4f && right > 0.4f, "input signal reaches the outputs (peak " + juce::String (left, 2) + " / " + juce::String (right, 2) + ")");
+    check (rack.takeInputPeak (0) > 0.4f, "channel input meter sees the signal");
+
+    if (status.bridged)
+        check (status.bridge.underruns <= 1, "bridge dropouts: " + juce::String (status.bridge.underruns)
+                                              + ", drift " + juce::String (status.bridge.driftPpm, 1) + " ppm");
+
+    engine.close();
+}
+
 int main()
 {
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
     testBridgeDrift (100.0, 64, 128);
     testBridgeDrift (-80.0, 256, 32);
     testBridgeDrift (30.0, 480, 512);
@@ -451,6 +498,8 @@ int main()
     testRouting();
     testLatencyCompensation();
     testSessionAndSnapshots();
+    testEndToEnd ("Duplex", "Duplex", 3.0);
+    testEndToEnd ("Dante", "USB", 8.0);
 
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;

@@ -47,6 +47,9 @@ public:
     const juce::OwnedArray<juce::AudioIODeviceType>& getDeviceTypes() const noexcept { return deviceTypes; }
     juce::AudioIODeviceType* findType (const juce::String& typeName) const;
 
+    /** Adds a driver type beyond the system ones (used by the end-to-end tests). */
+    void addDeviceType (std::unique_ptr<juce::AudioIODeviceType> type)   { deviceTypes.add (type.release()); }
+
     /** Opens the devices. Returns an empty string on success, or an error description. */
     juce::String open (const DeviceSelection&);
     void close();
@@ -71,6 +74,7 @@ public:
         double inputDeviceMs = 0.0, bridgeMs = 0.0, pluginMs = 0.0, outputDeviceMs = 0.0;
         ClockBridge::Stats bridge;
         juce::String lastError;
+        float inputPeak = 0.0f;             // loudest raw device input since the last getStatus()
     };
 
     Status getStatus() const;
@@ -87,6 +91,7 @@ private:
                                                float* const*, int, int numSamples,
                                                const juce::AudioIODeviceCallbackContext&) override
         {
+            engine.meterInput (inputs, numInputs, numSamples);
             engine.bridge.push (inputs, numInputs, numSamples);
         }
 
@@ -105,6 +110,7 @@ private:
     void audioDeviceError (const juce::String& message) override { reportError (message); }
 
     void timerCallback() override;
+    void meterInput (const float* const* inputs, int numInputs, int numSamples) noexcept;
     void reportError (const juce::String&);
     std::unique_ptr<juce::AudioIODevice> createAndOpen (const juce::String& typeName,
                                                         const juce::String& outputName,
@@ -128,6 +134,7 @@ private:
     std::atomic<bool> bridgeActive { false };
     std::atomic<double> currentSampleRate { 48000.0 };
     std::atomic<double> cpuLoad { 0.0 };
+    mutable std::atomic<float> inputPeak { 0.0f };
     std::atomic<int> alignedLatency { 0 };
     mutable juce::CriticalSection errorLock;
     juce::String lastError;

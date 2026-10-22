@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "DeviceSetupPanel.h"
 #include "PluginMenu.h"
+#include "platform/MicPermission.h"
 #include "RoutingMatrix.h"
 
 namespace bridgerack
@@ -105,6 +106,7 @@ MainComponent::MainComponent (juce::ApplicationProperties& p)
         selection = DeviceSelection::fromValueTree (juce::ValueTree::fromXml (*xml));
 
     openDevices (selection);
+    checkMicrophonePermission();
 
     if (! loadSession (getAutosaveFile(), false))
         addDefaultRacks();
@@ -755,6 +757,48 @@ juce::String MainComponent::openDevices (const DeviceSelection& selection)
     return error;
 }
 
+void MainComponent::checkMicrophonePermission()
+{
+    // macOS silently delivers zeros from every input until the app is allowed to record.
+    switch (MicPermission::get())
+    {
+        case MicPermission::Status::granted:
+            break;
+
+        case MicPermission::Status::notAsked:
+            MicPermission::request ([this] (bool granted)
+            {
+                if (granted)
+                    openDevices (engine.getSelection());   // reopen so inputs start delivering audio
+                else
+                    showMicrophoneDenied();
+            });
+            break;
+
+        case MicPermission::Status::denied:
+            showMicrophoneDenied();
+            break;
+    }
+}
+
+void MainComponent::showMicrophoneDenied()
+{
+    auto options = juce::MessageBoxOptions()
+                       .withIconType (juce::MessageBoxIconType::WarningIcon)
+                       .withTitle ("Audio input is blocked by macOS")
+                       .withMessage ("BridgeRack is not allowed to receive audio inputs, so every input is silent.\n\n"
+                                     "Open System Settings > Privacy & Security > Microphone, turn BridgeRack on, "
+                                     "then quit and reopen BridgeRack.")
+                       .withButton ("Open Settings")
+                       .withButton ("Later");
+
+    juce::AlertWindow::showAsync (options, [] (int result)
+    {
+        if (result == 1)
+            MicPermission::openSettings();
+    });
+}
+
 DeviceSelection MainComponent::defaultSelection() const
 {
     DeviceSelection s;
@@ -841,13 +885,35 @@ void MainComponent::updateStatus()
 
         juce::String text;
         auto colour = Colours::text;
+        const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+
+        if (status.inputPeak > 1.0e-6f || lastInputSignalMs <= 0.0)
+            lastInputSignalMs = nowMs;
+
+        if (sel.inputDevice.isEmpty())
+        {
+            text << "NO INPUT DEVICE SELECTED (Audio I/O)   |   ";
+            colour = Colours::warn;
+        }
+        else if (MicPermission::get() == MicPermission::Status::denied)
+        {
+            text << "INPUT BLOCKED: allow BridgeRack in macOS Privacy > Microphone   |   ";
+            colour = Colours::bad;
+        }
+        else if (nowMs - lastInputSignalMs > 5000.0)
+        {
+            text << "NO INPUT SIGNAL for " << juce::roundToInt ((nowMs - lastInputSignalMs) / 1000.0) << " s   |   ";
+            colour = Colours::warn;
+        }
 
         if (status.bridged)
         {
             const auto& b = status.bridge;
             text << "Bridge " << (b.locked ? "LOCKED " : "SYNCING ") << formatPpm (b.driftPpm)
                  << ", drops " << (b.underruns + b.overruns) << "   |   ";
-            colour = b.locked ? Colours::ok : Colours::warn;
+
+            if (colour == Colours::text)
+                colour = b.locked ? Colours::ok : Colours::warn;
         }
 
         // Where the latency comes from, so it is obvious what to change.

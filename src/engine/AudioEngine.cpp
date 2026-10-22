@@ -236,6 +236,7 @@ AudioEngine::Status AudioEngine::getStatus() const
     s.running = outputDevice != nullptr;
     s.bridged = inputDevice != nullptr;
     s.cpuLoad = cpuLoad;
+    s.inputPeak = inputPeak.exchange (0.0f);
     s.pluginLatency = alignedLatency;
 
     {
@@ -271,6 +272,25 @@ AudioEngine::Status AudioEngine::getStatus() const
     return s;
 }
 
+void AudioEngine::meterInput (const float* const* inputs, int numInputs, int numSamples) noexcept
+{
+    float peak = 0.0f;
+
+    for (int ch = 0; ch < numInputs; ++ch)
+    {
+        if (inputs[ch] != nullptr)
+        {
+            const auto range = juce::FloatVectorOperations::findMinAndMax (inputs[ch], numSamples);
+            peak = juce::jmax (peak, -range.getStart(), range.getEnd());
+        }
+    }
+
+    auto current = inputPeak.load (std::memory_order_relaxed);
+
+    while (peak > current && ! inputPeak.compare_exchange_weak (current, peak, std::memory_order_relaxed))
+    {}
+}
+
 void AudioEngine::reportError (const juce::String& message)
 {
     const juce::ScopedLock sl (errorLock);
@@ -303,6 +323,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
 
     if (! bridgeActive)
     {
+        meterInput (inputs, numInputs, numSamples);
         racks.process (inputs, numInputs, outputs, numOutputs, numSamples);
     }
     else
