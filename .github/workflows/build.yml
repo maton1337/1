@@ -21,7 +21,14 @@ jobs:
         run: cmake --build build --config Release -j 4
 
       - name: Engine tests
-        run: ./build/BridgeRackTests
+        run: |
+          set +e
+          ./build/BridgeRackTests > test.log 2>&1
+          status=$?
+          cat test.log
+          # Surface failures as annotations so they show up on the run page.
+          grep -E "FAIL|^[A-Za-z].*:" test.log | grep -B1 FAIL | while read -r line; do echo "::error::$line"; done
+          exit $status
 
       - name: Package
         run: |
