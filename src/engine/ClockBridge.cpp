@@ -17,6 +17,7 @@ namespace
     constexpr double kStatsTimeConst = 5.0;    // seconds, smoothing of the reported drift
     constexpr int    kLookahead     = 4;       // spare frames for the interpolator
     constexpr double kAdaptWindow   = 4.0;     // seconds of observation before shrinking the buffer
+    constexpr double kMaxBufferSecs = 0.25;    // the most an adaptive bridge will ever buffer
     constexpr int    kNoMargin      = std::numeric_limits<int>::max();
 }
 
@@ -43,9 +44,10 @@ void ClockBridge::prepare (const Settings& s)
 
     startTarget = target;
     minTarget = std::ceil (settings.outputBlockSize * nominalRatio * (1.0 + kMaxCorrection)) + kLookahead + 8;
+    maxTarget = juce::jmax (startTarget * 2.0, kMaxBufferSecs * settings.inputSampleRate);
     statTarget = target;
 
-    capacity = juce::nextPowerOfTwo (juce::jmax (16384, (int) (target + settings.inputBlockSize) * 8));
+    capacity = juce::nextPowerOfTwo (juce::jmax (16384, (int) (maxTarget + settings.inputBlockSize) * 4));
     fifo.setTotalSize (capacity);
     ring.setSize (settings.numChannels, capacity);
     ring.clear();
@@ -228,7 +230,13 @@ void ClockBridge::pull (float* const* dest, int numDestChannels, int numFrames, 
             // never shrink below that again so one dropout doesn't become a pattern.
             if (settings.adaptive)
             {
-                target = juce::jmin (startTarget * 2.0, target + juce::jmax (32, settings.inputBlockSize / 2));
+                // Size the buffer to the input gap actually happening right now (software
+                // drivers such as Dante Virtual Soundcard can stall for tens of ms), so it
+                // takes one or two dropouts to learn the system rather than dozens.
+                const auto stallFrames = juce::jmax (0.0, t - lastPushTime.load (std::memory_order_relaxed)) * settings.inputSampleRate;
+                const auto keep = juce::jmax (16, settings.extraSafetyFrames / 2);
+                const auto wanted = (double) needed + stallFrames + settings.inputBlockSize + keep;
+                target = juce::jlimit (minTarget, maxTarget, juce::jmax (target + juce::jmax (32, settings.inputBlockSize / 2), wanted));
                 minTarget = target;
             }
 

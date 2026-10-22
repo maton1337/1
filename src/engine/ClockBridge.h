@@ -90,7 +90,7 @@ private:
 
     double nominalRatio = 1.0;
     double target = 0.0;
-    double startTarget = 0.0, minTarget = 0.0;   // adaptive range
+    double startTarget = 0.0, minTarget = 0.0, maxTarget = 0.0;   // adaptive range
     int windowMinMargin = 0;
     double windowSeconds = 0.0;
     double smoothedFill = 0.0;
