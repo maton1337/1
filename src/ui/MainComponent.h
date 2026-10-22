@@ -41,6 +41,7 @@ private:
     void showRackMenu (Rack&);
     void openRouting (Rack&, bool input);
     void duplicateRack (Rack&);
+    void moveSlot (Rack& from, int fromSlot, Rack& to, int toSlot, bool copy);
     void copySlot (Rack&, int slot);
     void pasteSlot (Rack&, int slot);
 
@@ -96,7 +97,6 @@ private:
 
     juce::TextButton sessionButton { "Session" }, devicesButton { "Audio I/O" }, pluginsButton { "Plugins" },
                      addRackButton { "+ Rack" };
-    juce::ToggleButton alignButton { "Align latency" };
     juce::Label snapshotLabel;
     juce::ComboBox snapshotCombo;
     juce::TextButton previousSnapshot { "<" }, nextSnapshot { ">" }, storeButton { "Store" }, snapshotMenuButton { "..." };

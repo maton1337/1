@@ -104,26 +104,22 @@ int RackSet::indexOf (const Rack* rack) const
     return -1;
 }
 
-void RackSet::setLatencyCompensation (bool shouldCompensate)
-{
-    compensate = shouldCompensate;
-    updateLatencyCompensation();
-}
-
 int RackSet::updateLatencyCompensation()
 {
-    int maxLatency = 0;
-
+    int maxLatency = 0, maxAligned = 0;
     std::vector<int> latencies;
 
     for (auto& rack : racks)
     {
         latencies.push_back (rack->isBypassed() ? 0 : rack->getLatencySamples());
         maxLatency = juce::jmax (maxLatency, latencies.back());
+
+        if (rack->isAligned())
+            maxAligned = juce::jmax (maxAligned, latencies.back());
     }
 
     for (size_t i = 0; i < racks.size(); ++i)
-        racks[i]->setCompensationDelay (compensate ? maxLatency - latencies[i] : 0);
+        racks[i]->setCompensationDelay (racks[i]->isAligned() ? maxAligned - latencies[i] : 0);
 
     return maxLatency;
 }

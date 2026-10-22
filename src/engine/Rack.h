@@ -56,6 +56,19 @@ public:
                                                         std::unique_ptr<juce::AudioProcessor>,
                                                         const juce::PluginDescription& = {});
     std::unique_ptr<juce::AudioProcessor> removeProcessor (int slot);
+
+    /** Everything that lives in a slot, for moving plugins between racks without reloading them. */
+    struct SlotContents
+    {
+        std::unique_ptr<juce::AudioProcessor> processor;
+        juce::PluginDescription description;
+        bool bypassed = false;
+    };
+
+    SlotContents takeSlot (int slot);
+
+    /** Installs the contents (re-preparing the plugin for this rack) and returns what was there. */
+    SlotContents putSlot (int slot, SlotContents);
     void moveSlot (int from, int to);
 
     juce::AudioProcessor* getProcessor (int slot) const;
@@ -93,6 +106,10 @@ public:
     //==============================================================================
     /** Total latency reported by the plugins in this rack. */
     int getLatencySamples() const;
+
+    /** When on, this rack is delayed to line up with the slowest of the other aligned racks. */
+    void setAligned (bool a) noexcept            { aligned = a; }
+    bool isAligned() const noexcept              { return aligned; }
 
     /** Extra delay applied at the rack output to line it up with slower racks. */
     void setCompensationDelay (int samples) noexcept;
@@ -137,7 +154,7 @@ private:
     float inputGainDb = 0.0f, outputGainDb = 0.0f;
     juce::uint32 colour = 0;
     std::atomic<float> inputGain { 1.0f }, outputGain { 1.0f };
-    std::atomic<bool> muted { false }, bypassed { false };
+    std::atomic<bool> muted { false }, bypassed { false }, aligned { false };
 
     std::atomic<int> compensationDelay { 0 };
     int activeDelay = 0, delayWritePos = 0;

@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "DeviceSetupPanel.h"
+#include "PluginMenu.h"
 #include "RoutingMatrix.h"
 
 namespace bridgerack
@@ -7,8 +8,6 @@ namespace bridgerack
 
 namespace
 {
-    constexpr int pluginManagerItem = 1;
-
     /** A window that hides instead of closing, for tool panels. */
     class ToolWindow : public juce::DocumentWindow
     {
@@ -45,7 +44,10 @@ MainComponent::MainComponent (juce::ApplicationProperties& p)
     };
 
     rowCallbacks.onSlotMenu = [this] (Rack& rack, int slot) { showSlotMenu (rack, slot); };
-    rowCallbacks.onMoveSlot = [this] (Rack& rack, int from, int to) { rack.moveSlot (from, to); refreshRows(); };
+    rowCallbacks.onMoveSlot = [this] (Rack& from, int fromSlot, Rack& to, int toSlot, bool copy)
+    {
+        moveSlot (from, fromSlot, to, toSlot, copy);
+    };
     rowCallbacks.onRouting = [this] (Rack& rack, bool input) { openRouting (rack, input); };
     rowCallbacks.onChannelsChanged = [this] (Rack& rack, int n) { rack.setNumChannels (n); refreshRows(); };
     rowCallbacks.onRackMenu = [this] (Rack& rack) { showRackMenu (rack); };
@@ -60,8 +62,6 @@ MainComponent::MainComponent (juce::ApplicationProperties& p)
     pluginsButton.setTooltip ("Scan for and manage VST3 / AU / VST2 plugins");
     addRackButton.setTooltip ("Add a mono or stereo channel");
 
-    alignButton.setTooltip ("Delay racks with less plugin latency so all rack outputs stay time-aligned");
-    alignButton.onClick = [this] { engine.getRacks().setLatencyCompensation (alignButton.getToggleState()); };
 
     snapshotLabel.setText ("Snapshot", juce::dontSendNotification);
     snapshotLabel.setColour (juce::Label::textColourId, Colours::textDim);
@@ -83,7 +83,7 @@ MainComponent::MainComponent (juce::ApplicationProperties& p)
     snapshotMenuButton.onClick = [this] { showSnapshotMenu(); };
 
     for (auto* c : std::initializer_list<juce::Component*> { &sessionButton, &devicesButton, &pluginsButton, &addRackButton,
-                                                             &alignButton, &snapshotLabel, &snapshotCombo, &previousSnapshot,
+                                                             &snapshotLabel, &snapshotCombo, &previousSnapshot,
                                                              &nextSnapshot, &storeButton, &snapshotMenuButton, &ioLabel, &statusLabel })
         addAndMakeVisible (c);
 
@@ -109,7 +109,6 @@ MainComponent::MainComponent (juce::ApplicationProperties& p)
     if (! loadSession (getAutosaveFile(), false))
         addDefaultRacks();
 
-    alignButton.setToggleState (engine.getRacks().isLatencyCompensationOn(), juce::dontSendNotification);
 
     setWantsKeyboardFocus (true);
     setSize (1280, 860);
@@ -222,33 +221,41 @@ void MainComponent::refreshRows()
 //==============================================================================
 void MainComponent::showPluginChooser (Rack& rack, int slot)
 {
-    const auto types = host.getSortedTypes();
-    juce::PopupMenu menu;
+    auto menu = buildPluginMenu (host.getSortedTypes(), host.getRecent(),
+                                 [this, r = &rack, slot] (const juce::PluginDescription& d)
+                                 {
+                                     if (engine.getRacks().indexOf (r) >= 0)
+                                         loadPlugin (*r, slot, d);
+                                 },
+                                 [this] { showPluginManager(); });
 
-    if (types.isEmpty())
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+}
+
+void MainComponent::moveSlot (Rack& from, int fromSlot, Rack& to, int toSlot, bool copy)
+{
+    if (copy)
     {
-        menu.addItem (pluginManagerItem, "No plugins scanned yet - open Plugin Manager...");
+        const auto saved = clipboard;
+        copySlot (from, fromSlot);
+        pasteSlot (to, toSlot);
+        clipboard = saved;
+    }
+    else if (&from == &to)
+    {
+        from.moveSlot (fromSlot, toSlot);
     }
     else
     {
-        juce::KnownPluginList::addToMenu (menu, types, juce::KnownPluginList::sortByManufacturer);
-        menu.addSeparator();
-        menu.addItem (pluginManagerItem, "Plugin Manager...");
+        // Swap, so dropping onto an occupied slot never loses a plugin. The instances
+        // move as they are (settings, editor windows) and are re-prepared for their new channel.
+        auto moving = from.takeSlot (fromSlot);
+        auto displaced = to.putSlot (toSlot, std::move (moving));
+        from.putSlot (fromSlot, std::move (displaced));
     }
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(), [this, r = &rack, slot, types] (int result)
-    {
-        if (result == pluginManagerItem)
-        {
-            showPluginManager();
-            return;
-        }
-
-        const auto index = juce::KnownPluginList::getIndexChosenByMenu (types, result);
-
-        if (engine.getRacks().indexOf (r) >= 0 && juce::isPositiveAndBelow (index, types.size()))
-            loadPlugin (*r, slot, types[index]);
-    });
+    engine.getRacks().updateLatencyCompensation();
+    refreshRows();
 }
 
 void MainComponent::loadPlugin (Rack& rack, int slot, const juce::PluginDescription& description)
@@ -265,6 +272,7 @@ void MainComponent::loadPlugin (Rack& rack, int slot, const juce::PluginDescript
     }
 
     auto* processor = instance.get();
+    host.addRecent (description);
     dispose (rack.setProcessor (slot, std::move (instance), description));
     refreshRows();
     editors.show (*processor, rack.getName() + " / " + description.name);
@@ -543,7 +551,6 @@ void MainComponent::recallSnapshot (int index)
 
     const auto errors = applyRacks (snapshot->racks, engine.getRacks(), makeSessionCallbacks());
     snapshots.setCurrent (index);
-    alignButton.setToggleState (engine.getRacks().isLatencyCompensationOn(), juce::dontSendNotification);
     refreshRows();
     refreshSnapshots();
     reportErrors (errors);
@@ -711,7 +718,6 @@ bool MainComponent::loadSession (const juce::File& file, bool applyDevices)
     editors.closeAll();
     const auto errors = applyRacks (session.getChildWithName ("RACKS"), engine.getRacks(), makeSessionCallbacks());
     snapshots.loadFrom (session.getChildWithName ("SNAPSHOTS"));
-    alignButton.setToggleState (engine.getRacks().isLatencyCompensationOn(), juce::dontSendNotification);
 
     sessionFile = file == getAutosaveFile() ? juce::File (session.getProperty ("sourceFile").toString()) : file;
 
@@ -846,13 +852,18 @@ void MainComponent::updateStatus()
 
         // Where the latency comes from, so it is obvious what to change.
         const auto ms = [] (double v) { return juce::String (v, 1); };
+        // Inserts only delay their own channel, so they're reported separately from the base path.
+        const auto base = status.inputDeviceMs + status.bridgeMs + status.outputDeviceMs;
         text << "CPU " << juce::roundToInt (status.cpuLoad * 100.0) << "%   |   "
-             << "Latency " << ms (status.totalLatencyMs) << " ms  (in " << ms (status.inputDeviceMs);
+             << "Latency " << ms (base) << " ms  (in " << ms (status.inputDeviceMs);
 
         if (status.bridged)
             text << " + bridge " << ms (status.bridgeMs);
 
-        text << " + inserts " << ms (status.pluginMs) << " + out " << ms (status.outputDeviceMs) << ")";
+        text << " + out " << ms (status.outputDeviceMs) << ")";
+
+        if (status.pluginMs > 0.05)
+            text << "  + inserts up to " << ms (status.pluginMs) << " ms on the slowest channel";
 
         if (status.pluginMs > 5.0 && colour == Colours::text)
             colour = Colours::warn;
@@ -902,8 +913,6 @@ void MainComponent::resized()
         top.removeFromLeft (6);
     }
 
-    alignButton.setBounds (top.removeFromRight (120));
-    top.removeFromRight (12);
     snapshotMenuButton.setBounds (top.removeFromRight (32));
     top.removeFromRight (4);
     storeButton.setBounds (top.removeFromRight (60));

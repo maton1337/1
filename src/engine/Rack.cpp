@@ -194,6 +194,41 @@ std::unique_ptr<juce::AudioProcessor> Rack::removeProcessor (int slot)
     return setProcessor (slot, nullptr);
 }
 
+Rack::SlotContents Rack::takeSlot (int slot)
+{
+    SlotContents contents;
+
+    if (! juce::isPositiveAndBelow (slot, getNumSlots()))
+        return contents;
+
+    const juce::ScopedLock sl (lock);
+    auto& s = slots[(size_t) slot];
+    contents.processor = std::move (s.processor);
+    contents.description = s.description;
+    contents.bypassed = s.bypassed;
+    s.description = {};
+    s.bypassed = false;
+    return contents;
+}
+
+Rack::SlotContents Rack::putSlot (int slot, SlotContents contents)
+{
+    if (! juce::isPositiveAndBelow (slot, getNumSlots()))
+        return contents;
+
+    // The plugin may come from a rack with a different channel count.
+    if (contents.processor != nullptr && prepared)
+        configureProcessor (*contents.processor);
+
+    const juce::ScopedLock sl (lock);
+    auto& s = slots[(size_t) slot];
+    SlotContents previous { std::move (s.processor), s.description, s.bypassed };
+    s.processor = std::move (contents.processor);
+    s.description = contents.description;
+    s.bypassed = contents.bypassed;
+    return previous;
+}
+
 void Rack::moveSlot (int from, int to)
 {
     if (! juce::isPositiveAndBelow (from, getNumSlots()) || ! juce::isPositiveAndBelow (to, getNumSlots()) || from == to)
@@ -433,6 +468,7 @@ juce::ValueTree Rack::toValueTree() const
         .setProperty ("outputGainDb", outputGainDb, nullptr)
         .setProperty ("colour", (juce::int64) colour, nullptr)
         .setProperty ("muted", muted.load(), nullptr)
+        .setProperty ("align", aligned.load(), nullptr)
         .setProperty ("bypassed", bypassed.load(), nullptr)
         .setProperty ("inputMap", mapToString (inputMap), nullptr)
         .setProperty ("outputMap", mapToString (outputMap), nullptr);

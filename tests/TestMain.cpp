@@ -116,13 +116,14 @@ struct BridgeRun
     double finalPpm = 0.0, finalFill = 0.0, target = 0.0;
     double maxStepAfterSettle = 0.0;
     double measuredFrequency = 0.0;
+    double startTarget = 0.0;
     bool locked = false;
 };
 
 /** Runs two simulated devices against a ClockBridge in event order.
     drift is how much faster the input clock runs than nominal (e.g. 100e-6). */
 BridgeRun simulateBridge (double inRate, double outRate, int inBlock, int outBlock,
-                          double drift, double seconds, double sineHz = 0.0)
+                          double drift, double seconds, double sineHz = 0.0, double stallAt = -1.0)
 {
     ClockBridge bridge;
     ClockBridge::Settings s;
@@ -134,10 +135,11 @@ BridgeRun simulateBridge (double inRate, double outRate, int inBlock, int outBlo
     bridge.prepare (s);
 
     juce::AudioBuffer<float> in (2, inBlock), out (2, outBlock);
+    BridgeRun r;
+    r.startTarget = bridge.getStats().targetFrames;
     double tIn = 0.0, tOut = 0.0, phase = 0.0;
     const auto actualInRate = inRate * (1.0 + drift);
     const auto settleTime = 5.0;
-    BridgeRun r;
 
     float previous = 0.0f;
     bool havePrevious = false;
@@ -170,6 +172,13 @@ BridgeRun simulateBridge (double inRate, double outRate, int inBlock, int outBlo
             bridge.push (in.getArrayOfReadPointers(), 2, inBlock, inStamp);
             tIn += inBlock / actualInRate;
             inStamp = tIn + jitter();
+
+            // Optionally one input callback arrives 3 ms late, like a busy driver.
+            if (stallAt > 0.0 && tIn >= stallAt)
+            {
+                inStamp += 0.003;
+                stallAt = -1.0;
+            }
         }
         else
         {
@@ -239,6 +248,18 @@ void testBridgeDrift (double driftPpm, int inBlock, int outBlock)
     check (std::abs (r.finalFill - r.target) < juce::jmax (16.0, r.target * 0.1),
            "fill " + juce::String (r.finalFill, 1) + " ~ target " + juce::String (r.target, 1));
     check (r.locked, "reports locked");
+}
+
+void testBridgeAdaptation()
+{
+    std::printf ("ClockBridge: adaptive buffer\n");
+    const auto r = simulateBridge (48000.0, 48000.0, 256, 256, 20.0e-6, 120.0);
+    check (r.target < r.startTarget * 0.8 && r.underrunsAfterSettle == 0,
+           "shrinks from " + juce::String (r.startTarget, 0) + " to " + juce::String (r.target, 0) + " frames without dropouts");
+
+    const auto stalled = simulateBridge (48000.0, 48000.0, 256, 256, 20.0e-6, 120.0, 0.0, 60.0);
+    check (stalled.totalUnderruns <= 1, "a late input callback costs at most one dropout (" + juce::String (stalled.totalUnderruns) + ")");
+    check (stalled.target > r.target, "and the buffer grows afterwards (" + juce::String (stalled.target, 0) + " frames)");
 }
 
 void testBridgeRateConversion()
@@ -318,9 +339,17 @@ void testLatencyCompensation()
     slow.setProcessor (0, std::make_unique<DelayProcessor> (100), describe ("Delay"));
     slow.setOutputMap ({ 0 });
     fast.setOutputMap ({ 1 });
-    racks.setLatencyCompensation (true);
+    racks.updateLatencyCompensation();
+    check (fast.getCompensationDelay() == 0, "racks are not delayed unless they opt in");
 
-    check (fast.getCompensationDelay() == 100 && slow.getCompensationDelay() == 0, "faster rack is delayed by 100 samples");
+    slow.setAligned (true);
+    fast.setAligned (true);
+    auto& other = racks.addRack (std::make_unique<Rack> ("Other", 1));
+    other.setOutputMap ({ -1 });
+    racks.updateLatencyCompensation();
+
+    check (fast.getCompensationDelay() == 100 && slow.getCompensationDelay() == 0, "aligned faster rack is delayed by 100 samples");
+    check (other.getCompensationDelay() == 0, "a rack that isn't aligned keeps its own latency");
 
     juce::AudioBuffer<float> in (1, 32), out (2, 32);
     int slowPeak = -1, fastPeak = -1;
@@ -417,6 +446,7 @@ int main()
     testBridgeDrift (100.0, 64, 128);
     testBridgeDrift (-80.0, 256, 32);
     testBridgeDrift (30.0, 480, 512);
+    testBridgeAdaptation();
     testBridgeRateConversion();
     testRouting();
     testLatencyCompensation();

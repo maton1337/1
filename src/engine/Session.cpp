@@ -74,7 +74,6 @@ namespace
 juce::ValueTree captureRacks (const RackSet& racks)
 {
     juce::ValueTree tree ("RACKS");
-    tree.setProperty ("latencyCompensation", racks.isLatencyCompensationOn(), nullptr);
 
     for (int i = 0; i < racks.size(); ++i)
         tree.appendChild (racks.getRack (i)->toValueTree(), nullptr);
@@ -107,6 +106,7 @@ juce::StringArray applyRack (const juce::ValueTree& rackTree, Rack& rack, const 
     rack.setOutputGainDb (rackTree.getProperty ("outputGainDb", 0.0f));
     rack.setColour ((juce::uint32) (juce::int64) rackTree.getProperty ("colour", 0));
     rack.setMuted (rackTree.getProperty ("muted", false));
+    rack.setAligned (rackTree.getProperty ("align", false));
     rack.setBypassed (rackTree.getProperty ("bypassed", false));
 
     std::vector<bool> covered ((size_t) rack.getNumSlots(), false);
@@ -139,7 +139,6 @@ juce::StringArray applyRacks (const juce::ValueTree& racksTree, RackSet& racks, 
     juce::StringArray errors;
     int numRacks = 0;
 
-    racks.setLatencyCompensation (racksTree.getProperty ("latencyCompensation", false));
 
     for (const auto& rackTree : racksTree)
     {

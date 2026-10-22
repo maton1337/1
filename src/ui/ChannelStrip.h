@@ -11,7 +11,8 @@ struct StripCallbacks
 {
     std::function<void (Rack&, int slot)> onSlotClicked;
     std::function<void (Rack&, int slot)> onSlotMenu;
-    std::function<void (Rack&, int from, int to)> onMoveSlot;
+    /** A plugin was dragged onto a slot, possibly on another channel. copy = Option/Alt held. */
+    std::function<void (Rack& from, int fromSlot, Rack& to, int toSlot, bool copy)> onMoveSlot;
     std::function<void (Rack&, bool input)> onRouting;
     std::function<void (Rack&, int numChannels)> onChannelsChanged;
     std::function<void (Rack&)> onRackMenu;
@@ -56,7 +57,7 @@ private:
 
     juce::Label nameLabel, gainLabel, faderLabel, latencyLabel;
     juce::TextButton widthButton, inputButton, outputButton;
-    juce::TextButton muteButton { "MUTE" }, bypassButton { "BYP" }, menuButton { "..." };
+    juce::TextButton muteButton { "MUTE" }, bypassButton { "BYP" }, menuButton { "..." }, alignButton { "PDC" };
     juce::Slider gain, fader;
     MultiMeter meter;
     juce::OwnedArray<SlotButton> slotButtons;

@@ -1,4 +1,5 @@
 #include "ChannelStrip.h"
+#include "PluginMenu.h"
 
 namespace bridgerack
 {
@@ -55,11 +56,20 @@ public:
             return;
         }
 
-        // A small marker shows at a glance which plugins add latency.
-        if (processor->getLatencySamples() > 0)
+        // Category colour on the left edge.
+        g.setColour (PluginCategory::of (rack.getDescription (slot)).colour.withAlpha (bypassed ? 0.4f : 1.0f));
+        g.fillRect (bounds.getX() - 3.0f, bounds.getY() + 2.0f, 2.5f, bounds.getHeight() - 4.0f);
+
+        // Plugins that add latency show it right on the slot.
+        if (const auto latency = processor->getLatencySamples(); latency > 0 && rack.getSampleRate() > 0.0)
         {
-            g.setColour (Colours::warn);
-            g.fillRect (bounds.getX() - 3.0f, bounds.getY() + 3.0f, 2.0f, bounds.getHeight() - 6.0f);
+            const auto ms = latency * 1000.0 / rack.getSampleRate();
+            g.setColour (ms >= 5.0 ? Colours::bad : Colours::warn);
+            g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
+            const auto text = ms >= 10.0 ? juce::String (juce::roundToInt (ms)) : juce::String (ms, 1);
+            g.drawText (text, bounds.removeFromRight (22.0f), juce::Justification::centredRight);
+            bounds.removeFromRight (2.0f);
+            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
         }
 
         g.setColour (bypassed ? Colours::textDim : Colours::text);
@@ -97,8 +107,8 @@ public:
 
     bool isInterestedInDragSource (const SourceDetails& details) override
     {
-        auto* source = dynamic_cast<SlotButton*> (details.sourceComponent.get());
-        return source != nullptr && &source->owner == &owner && details.description.toString().startsWith (slotDragPrefix);
+        return dynamic_cast<SlotButton*> (details.sourceComponent.get()) != nullptr
+            && details.description.toString().startsWith (slotDragPrefix);
     }
 
     void itemDragEnter (const SourceDetails&) override { dragOver = true; repaint(); }
@@ -107,12 +117,15 @@ public:
     void itemDropped (const SourceDetails& details) override
     {
         dragOver = false;
-        const auto from = details.description.toString().fromFirstOccurrenceOf (slotDragPrefix, false, false).getIntValue();
-
-        if (from != slot)
-            owner.callbacks.onMoveSlot (owner.rack, from, slot);
-
         repaint();
+
+        auto* source = dynamic_cast<SlotButton*> (details.sourceComponent.get());
+
+        if (source == nullptr || source == this)
+            return;
+
+        const auto copy = juce::ModifierKeys::getCurrentModifiers().isAltDown();
+        owner.callbacks.onMoveSlot (source->owner.rack, source->slot, owner.rack, slot, copy);
     }
 
 private:
@@ -150,10 +163,16 @@ ChannelStrip::ChannelStrip (Rack& r, int i, StripCallbacks& cb)
     bypassButton.setTooltip ("Bypass every insert on this channel");
     bypassButton.onClick = [this] { rack.setBypassed (bypassButton.getToggleState()); };
 
+    alignButton.setClickingTogglesState (true);
+    alignButton.setColour (juce::TextButton::buttonOnColourId, Colours::accent);
+    alignButton.setTooltip ("Latency alignment: channels with PDC on are delayed to line up with the slowest PDC channel. "
+                            "Channels with PDC off keep only their own latency.");
+    alignButton.onClick = [this] { rack.setAligned (alignButton.getToggleState()); };
+
     menuButton.setTooltip ("Channel options");
     menuButton.onClick = [this] { callbacks.onRackMenu (rack); };
 
-    for (auto* b : { &widthButton, &inputButton, &outputButton, &muteButton, &bypassButton, &menuButton })
+    for (auto* b : { &widthButton, &inputButton, &outputButton, &muteButton, &bypassButton, &menuButton, &alignButton })
         addAndMakeVisible (b);
 
     gain.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
@@ -223,6 +242,7 @@ void ChannelStrip::refresh()
     outputButton.setButtonText ("OUT " + describeMap (rack.getOutputMap()));
     muteButton.setToggleState (rack.isMuted(), juce::dontSendNotification);
     bypassButton.setToggleState (rack.isBypassed(), juce::dontSendNotification);
+    alignButton.setToggleState (rack.isAligned(), juce::dontSendNotification);
     gain.setValue (rack.getInputGainDb(), juce::dontSendNotification);
     fader.setValue (rack.getOutputGainDb(), juce::dontSendNotification);
     gainLabel.setText ("GAIN " + FaderLaw::format (rack.getInputGainDb()), juce::dontSendNotification);
@@ -246,9 +266,11 @@ void ChannelStrip::refresh()
         if (auto* p = rack.getProcessor (i))
         {
             const auto latency = p->getLatencySamples();
-            tip = rack.getDescription (i).descriptiveName
+            const auto description = rack.getDescription (i);
+            tip = description.name + " (" + description.manufacturerName + ", " + PluginCategory::of (description).name + ")"
                 + "\nLatency: " + juce::String (latency) + " samples"
-                + "\nClick: editor   Arrow / right-click: options   Drag: move";
+                + "\nClick: editor   Arrow / right-click: options"
+                + "\nDrag to any channel to move it, hold Option/Alt to copy";
         }
 
         slotButtons[i]->setTooltip (tip);
@@ -289,7 +311,7 @@ void ChannelStrip::updateMeters()
 
 int ChannelStrip::getMinimumHeight() const
 {
-    return 36 + 26 + 76 + 16 + rack.getNumSlots() * slotHeight + 6 + 26 + 26 + 200 + 18 + 12;
+    return 36 + 26 + 76 + 16 + rack.getNumSlots() * slotHeight + 6 + 26 + 26 + 200 + 20 + 12;
 }
 
 void ChannelStrip::paint (juce::Graphics& g)
@@ -362,7 +384,9 @@ void ChannelStrip::resized()
     outputButton.setBounds (area.removeFromTop (22));
     area.removeFromTop (4);
 
-    latencyLabel.setBounds (area.removeFromBottom (16));
+    auto footer = area.removeFromBottom (18);
+    alignButton.setBounds (footer.removeFromLeft (34));
+    latencyLabel.setBounds (footer);
     faderLabel.setBounds (area.removeFromTop (16));
 
     auto faderArea = area;

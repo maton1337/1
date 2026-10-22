@@ -44,6 +44,31 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const juc
     return formatManager.createPluginInstance (description, sampleRate, blockSize, error);
 }
 
+juce::Array<juce::PluginDescription> PluginHost::getRecent() const
+{
+    juce::Array<juce::PluginDescription> recent;
+    const auto ids = juce::StringArray::fromLines (settings.getValue ("recentPlugins"));
+
+    for (auto& id : ids)
+        if (auto type = knownPlugins.getTypeForIdentifierString (id))
+            recent.add (*type);
+
+    return recent;
+}
+
+void PluginHost::addRecent (const juce::PluginDescription& description)
+{
+    auto ids = juce::StringArray::fromLines (settings.getValue ("recentPlugins"));
+    ids.removeEmptyStrings();
+    ids.removeString (description.createIdentifierString());
+    ids.insert (0, description.createIdentifierString());
+
+    while (ids.size() > 10)
+        ids.remove (ids.size() - 1);
+
+    settings.setValue ("recentPlugins", ids.joinIntoString ("\n"));
+}
+
 juce::String PluginHost::getFormatNames() const
 {
     juce::StringArray names;

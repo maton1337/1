@@ -1,5 +1,7 @@
 #include "ClockBridge.h"
 
+#include <limits>
+
 namespace bridgerack
 {
 
@@ -14,6 +16,8 @@ namespace
     constexpr double kFillTimeConst = 0.2;     // seconds
     constexpr double kStatsTimeConst = 5.0;    // seconds, smoothing of the reported drift
     constexpr int    kLookahead     = 4;       // spare frames for the interpolator
+    constexpr double kAdaptWindow   = 4.0;     // seconds of observation before shrinking the buffer
+    constexpr int    kNoMargin      = std::numeric_limits<int>::max();
 }
 
 double ClockBridge::now() noexcept
@@ -36,6 +40,10 @@ void ClockBridge::prepare (const Settings& s)
            + kLookahead
            + settings.inputBlockSize / 2
            + settings.extraSafetyFrames;
+
+    startTarget = target;
+    minTarget = std::ceil (settings.outputBlockSize * nominalRatio * (1.0 + kMaxCorrection)) + kLookahead + 8;
+    statTarget = target;
 
     capacity = juce::nextPowerOfTwo (juce::jmax (16384, (int) (target + settings.inputBlockSize) * 8));
     fifo.setTotalSize (capacity);
@@ -70,6 +78,8 @@ void ClockBridge::reprime() noexcept
     currentRatio = nominalRatio;
     blocksSincePrime = 0;
     statLocked = false;
+    windowMinMargin = kNoMargin;
+    windowSeconds = 0.0;
 
     for (int ch = 0; ch < settings.numChannels && interpolators != nullptr; ++ch)
         interpolators[(size_t) ch].reset();
@@ -213,10 +223,40 @@ void ClockBridge::pull (float* const* dest, int numDestChannels, int numFrames, 
         if (ready < needed)
         {
             ++statUnderruns;
+
+            // The buffer was too tight for this system's jitter: give it more room, and
+            // never shrink below that again so one dropout doesn't become a pattern.
+            if (settings.adaptive)
+            {
+                target = juce::jmin (startTarget * 2.0, target + juce::jmax (32, settings.inputBlockSize / 2));
+                minTarget = target;
+            }
+
+            statTarget = target;
             silence();
             reprime();
             offset += n;
             continue;
+        }
+
+        if (settings.adaptive && blocksSincePrime * dt > 2.0)
+        {
+            // Track the smallest spare margin seen; if even the worst case left plenty of
+            // room over a whole window, shrink the target latency by part of the excess.
+            windowMinMargin = juce::jmin (windowMinMargin, ready - needed);
+            windowSeconds += dt;
+
+            if (windowSeconds >= kAdaptWindow)
+            {
+                const auto keep = juce::jmax (16, settings.extraSafetyFrames / 2);
+
+                if (windowMinMargin > keep * 2)
+                    target = juce::jmax (minTarget, target - (windowMinMargin - keep) * 0.5);
+
+                statTarget = target;
+                windowMinMargin = kNoMargin;
+                windowSeconds = 0.0;
+            }
         }
 
         int start1, size1, start2, size2;
@@ -262,8 +302,8 @@ ClockBridge::Stats ClockBridge::getStats() const noexcept
     s.ratio        = statRatio;
     s.driftPpm     = (s.ratio / nominalRatio - 1.0) * 1.0e6;
     s.fillFrames   = statFill;
-    s.targetFrames = target;
-    s.latencyMs    = (target + settings.inputBlockSize * 0.5) / settings.inputSampleRate * 1000.0;
+    s.targetFrames = statTarget;
+    s.latencyMs    = (s.targetFrames + settings.inputBlockSize * 0.5) / settings.inputSampleRate * 1000.0;
     s.underruns    = statUnderruns;
     s.overruns     = statOverruns;
     s.locked       = statLocked;

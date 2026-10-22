@@ -34,6 +34,7 @@ public:
         int    inputBlockSize    = 256;
         int    outputBlockSize   = 256;
         int    extraSafetyFrames = 64;   // added on top of the computed target latency
+        bool   adaptive          = true; // shrink the buffer to the jitter actually observed
     };
 
     struct Stats
@@ -89,6 +90,9 @@ private:
 
     double nominalRatio = 1.0;
     double target = 0.0;
+    double startTarget = 0.0, minTarget = 0.0;   // adaptive range
+    int windowMinMargin = 0;
+    double windowSeconds = 0.0;
     double smoothedFill = 0.0;
     double integral = 0.0;
     double currentRatio = 1.0;
@@ -96,7 +100,7 @@ private:
     bool primed = false;
     int blocksSincePrime = 0;
 
-    std::atomic<double> statRatio { 1.0 }, statFill { 0.0 };
+    std::atomic<double> statRatio { 1.0 }, statFill { 0.0 }, statTarget { 0.0 };
     std::atomic<int> statUnderruns { 0 }, statOverruns { 0 };
     std::atomic<bool> statLocked { false };
 };

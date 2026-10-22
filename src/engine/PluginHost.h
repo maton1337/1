@@ -30,6 +30,10 @@ public:
                                                                double sampleRate, int blockSize,
                                                                juce::String& error);
 
+    /** Most recently inserted plugins, newest first. */
+    juce::Array<juce::PluginDescription> getRecent() const;
+    void addRecent (const juce::PluginDescription&);
+
     /** e.g. "VST3, AudioUnit" */
     juce::String getFormatNames() const;
 

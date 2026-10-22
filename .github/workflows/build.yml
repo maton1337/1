@@ -30,6 +30,8 @@ jobs:
           codesign --force --deep --sign - "$APP"
           mkdir -p dist
           ditto -c -k --keepParent "$APP" dist/BridgeRack-macOS.zip
+          cp build/BridgeRackProbe dist/
+          codesign --force --sign - dist/BridgeRackProbe
           hdiutil create -volname BridgeRack -srcfolder "$APP" -ov -format UDZO dist/BridgeRack-macOS.dmg
 
       - uses: actions/upload-artifact@v4

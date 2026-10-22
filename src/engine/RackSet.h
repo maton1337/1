@@ -26,11 +26,9 @@ public:
     Rack* getRack (int index) const;
     int indexOf (const Rack*) const;
 
-    /** When on, racks with less latency are delayed so every rack output lines up. */
-    void setLatencyCompensation (bool);
-    bool isLatencyCompensationOn() const noexcept { return compensate; }
-
-    /** Re-reads plugin latencies; call periodically from the message thread. Returns the aligned latency. */
+    /** Re-reads plugin latencies and delays each aligned rack to match the slowest aligned rack;
+        racks that aren't aligned keep only their own latency. Call periodically from the message
+        thread. Returns the largest latency of any single rack. */
     int updateLatencyCompensation();
 
     double getSampleRate() const noexcept        { return sampleRate; }
@@ -49,7 +47,6 @@ private:
     double sampleRate = 48000.0;
     int blockSize = 512;
     bool prepared = false;
-    bool compensate = false;
 
     std::vector<const float*> inputChunk;
     std::vector<float*> outputChunk;

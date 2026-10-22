@@ -65,7 +65,8 @@ target_compile_definitions(bridgerack_core PUBLIC
     JUCE_PLUGINHOST_LV2=${_linux}
     JUCE_JACK=${_linux}
     JUCE_ALSA=${_linux}
-    JUCE_USE_XINPUT=0)
+    JUCE_USE_XINPUT=0
+    JUCE_MODAL_LOOPS_PERMITTED=1)
 
 target_link_libraries(bridgerack_core
     PRIVATE
@@ -100,6 +101,7 @@ if(BRIDGERACK_BUILD_APP)
         src/ui/DeviceSetupPanel.cpp
         src/ui/LookAndFeel.cpp
         src/ui/MainComponent.cpp
+        src/ui/PluginMenu.cpp
         src/ui/PluginWindows.cpp
         src/ui/ChannelStrip.cpp
         src/ui/RoutingMatrix.cpp)
@@ -115,6 +117,10 @@ endif()
 if(BRIDGERACK_BUILD_TESTS)
     add_executable(BridgeRackTests tests/TestMain.cpp)
     target_link_libraries(BridgeRackTests PRIVATE bridgerack_core)
+
+    # Command-line tool that measures the latency and CPU use of installed plugins.
+    add_executable(BridgeRackProbe tests/Probe.cpp)
+    target_link_libraries(BridgeRackProbe PRIVATE bridgerack_core)
     enable_testing()
     add_test(NAME engine COMMAND BridgeRackTests)
 endif()
