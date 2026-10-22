@@ -443,10 +443,10 @@ void testSessionAndSnapshots()
 }
 }
 
-void testEndToEnd (const juce::String& inputDevice, const juce::String& outputDevice, double seconds)
+void testEndToEnd (const juce::String& inputDevice, const juce::String& outputDevice, double seconds, bool adaptive = true)
 {
-    std::printf ("AudioEngine end to end: %s -> %s, real-time threads for %.0f s\n",
-                 inputDevice.toRawUTF8(), outputDevice.toRawUTF8(), seconds);
+    std::printf ("AudioEngine end to end: %s -> %s, real-time threads for %.0f s%s\n",
+                 inputDevice.toRawUTF8(), outputDevice.toRawUTF8(), seconds, adaptive ? "" : ", fixed bridge buffer");
 
     AudioEngine engine;
     auto fakeType = std::make_unique<test::FakeDeviceType>();
@@ -462,6 +462,7 @@ void testEndToEnd (const juce::String& inputDevice, const juce::String& outputDe
     sel.inputDevice = inputDevice;
     sel.outputDevice = outputDevice;
     sel.inputBlockSize = sel.outputBlockSize = 256;
+    sel.adaptiveBridge = adaptive;
 
     const auto error = engine.open (sel);
     check (error.isEmpty(), "devices open" + (error.isEmpty() ? juce::String() : ": " + error));
@@ -482,8 +483,10 @@ void testEndToEnd (const juce::String& inputDevice, const juce::String& outputDe
     if (status.bridged)
     {
         const auto& b = status.bridge;
-        std::printf ("  [info] bridge target %.0f frames, fill %.0f, ratio %.6f, input callbacks %d, output callbacks %d\n",
-                     b.targetFrames, b.fillFrames, b.ratio, fake->lastInput->getCallbacks(), fake->last->getCallbacks());
+        std::printf ("  [info] %s: target %.0f, fill %.0f, ratio %.6f, callbacks in %d / out %d, max gap in %.1f ms / out %.1f ms, drops %d\n",
+                     adaptive ? "adaptive" : "fixed", b.targetFrames, b.fillFrames, b.ratio,
+                     fake->lastInput->getCallbacks(), fake->last->getCallbacks(),
+                     fake->lastInput->getMaxGapMs(), fake->last->getMaxGapMs(), b.underruns);
         check (b.underruns <= 1, "bridge dropouts: " + juce::String (b.underruns) + ", drift " + juce::String (b.driftPpm, 1) + " ppm");
     }
 
@@ -504,6 +507,7 @@ int main()
     testSessionAndSnapshots();
     testEndToEnd ("Duplex", "Duplex", 3.0);
     testEndToEnd ("Dante", "USB", 8.0);
+    testEndToEnd ("Dante", "USB", 8.0, false);
 
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;

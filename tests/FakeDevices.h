@@ -63,6 +63,7 @@ public:
     /** Largest output sample seen per channel since the last call. */
     float takeOutputPeak (int channel) { return juce::isPositiveAndBelow (channel, 8) ? peaks[(size_t) channel].exchange (0.0f) : 0.0f; }
     int getCallbacks() const { return callbacks; }
+    double getMaxGapMs() const { return maxGapMs; }
 
 private:
     static juce::StringArray names (const juce::String& prefix, int n)
@@ -110,6 +111,12 @@ private:
             }
 
             ++callbacks;
+            const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+
+            if (lastCallbackMs > 0.0)
+                maxGapMs = juce::jmax (maxGapMs.load(), nowMs - lastCallbackMs);
+
+            lastCallbackMs = nowMs;
             next += period;
 
             // Sleep most of the way, then yield until the deadline, so the device keeps
@@ -139,6 +146,8 @@ private:
     std::atomic<juce::AudioIODeviceCallback*> callback { nullptr };
     std::array<std::atomic<float>, 8> peaks {};
     std::atomic<int> callbacks { 0 };
+    std::atomic<double> maxGapMs { 0.0 };
+    double lastCallbackMs = 0.0;
 };
 
 /** Driver type exposing an input-only "Dante" device and an output-only "USB" device,

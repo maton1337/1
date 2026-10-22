@@ -18,6 +18,7 @@ struct DeviceSelection
     int inputBlockSize  = 256;
     int outputBlockSize = 256;
     int bridgeSafetyFrames = 64;
+    bool adaptiveBridge = true;
 
     bool usesSingleDevice() const
     {

@@ -14,7 +14,8 @@ juce::ValueTree DeviceSelection::toValueTree() const
         .setProperty ("outputSampleRate", outputSampleRate, nullptr)
         .setProperty ("inputBlockSize", inputBlockSize, nullptr)
         .setProperty ("outputBlockSize", outputBlockSize, nullptr)
-        .setProperty ("bridgeSafetyFrames", bridgeSafetyFrames, nullptr);
+        .setProperty ("bridgeSafetyFrames", bridgeSafetyFrames, nullptr)
+        .setProperty ("adaptiveBridge", adaptiveBridge, nullptr);
     return tree;
 }
 
@@ -30,6 +31,7 @@ DeviceSelection DeviceSelection::fromValueTree (const juce::ValueTree& tree)
     s.inputBlockSize     = tree.getProperty ("inputBlockSize", s.inputBlockSize);
     s.outputBlockSize    = tree.getProperty ("outputBlockSize", s.outputBlockSize);
     s.bridgeSafetyFrames = tree.getProperty ("bridgeSafetyFrames", s.bridgeSafetyFrames);
+    s.adaptiveBridge     = tree.getProperty ("adaptiveBridge", s.adaptiveBridge);
     return s;
 }
 
@@ -162,6 +164,7 @@ juce::String AudioEngine::open (const DeviceSelection& newSelection)
         s.inputBlockSize    = inputDevice->getCurrentBufferSizeSamples();
         s.outputBlockSize   = outBlock;
         s.extraSafetyFrames = selection.bridgeSafetyFrames;
+        s.adaptive          = selection.adaptiveBridge;
         bridge.prepare (s);
 
         bridgedInput.setSize (s.numChannels, outBlock);
