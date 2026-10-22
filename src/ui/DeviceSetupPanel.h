@@ -36,6 +36,7 @@ private:
     Side input, output;
     juce::Label safetyLabel, info, status;
     juce::ComboBox safety;
+    juce::ToggleButton adaptive { "Adaptive buffer (learns driver jitter)" };
     juce::TextButton applyButton { "Apply" };
 };
 

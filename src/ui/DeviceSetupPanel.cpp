@@ -60,6 +60,11 @@ DeviceSetupPanel::DeviceSetupPanel (AudioEngine& e, std::function<juce::String (
 
     addAndMakeVisible (safety);
 
+    adaptive.setToggleState (sel.adaptiveBridge, juce::dontSendNotification);
+    adaptive.setTooltip ("On: the bridge starts small and grows only as much as the input driver's timing needs. "
+                         "Off: fixed buffer of the size above.");
+    addAndMakeVisible (adaptive);
+
     info.setText ("Input and output can be different devices and even different drivers, "
                   "e.g. receive from Dante Virtual Soundcard and send to a USB interface. "
                   "The output device is the master clock; input is resampled adaptively to follow it. "
@@ -186,6 +191,7 @@ void DeviceSetupPanel::updateSharedState()
     input.rate.setEnabled (! shared);
     input.block.setEnabled (! shared);
     safety.setEnabled (! shared && input.device.getSelectedId() != noneId);
+    adaptive.setEnabled (safety.isEnabled());
 }
 
 DeviceSelection DeviceSetupPanel::getSelection() const
@@ -200,6 +206,7 @@ DeviceSelection DeviceSetupPanel::getSelection() const
     s.inputBlockSize   = input.block.getSelectedId() > 0 ? input.block.getSelectedId() : 256;
     s.outputBlockSize  = output.block.getSelectedId() > 0 ? output.block.getSelectedId() : 256;
     s.bridgeSafetyFrames = safety.getSelectedId() > 0 ? safety.getSelectedId() : 64;
+    s.adaptiveBridge = adaptive.getToggleState();
     return s;
 }
 
@@ -240,6 +247,8 @@ void DeviceSetupPanel::resized()
     auto line = area.removeFromTop (28);
     safetyLabel.setBounds (line.removeFromLeft (150));
     safety.setBounds (line.removeFromLeft (150).reduced (0, 2));
+    line.removeFromLeft (12);
+    adaptive.setBounds (line);
 
     area.removeFromTop (6);
     auto bottom = area.removeFromBottom (32);
