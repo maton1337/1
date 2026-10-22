@@ -111,10 +111,21 @@ private:
 
             ++callbacks;
             next += period;
-            const auto wait = next - juce::Time::getMillisecondCounterHiRes();
 
-            if (wait > 0)
-                juce::Thread::sleep ((int) wait);
+            // Sleep most of the way, then yield until the deadline, so the device keeps
+            // time like hardware does instead of drifting with the OS timer granularity.
+            for (;;)
+            {
+                const auto wait = next - juce::Time::getMillisecondCounterHiRes();
+
+                if (wait <= 0.0)
+                    break;
+
+                if (wait > 2.0)
+                    juce::Thread::sleep ((int) wait - 1);
+                else
+                    juce::Thread::yield();
+            }
         }
     }
 
@@ -152,13 +163,14 @@ public:
             return last = new FakeDevice ("Duplex", 2, 2, 1.0, 440.0f);
 
         if (inputName.isNotEmpty())
-            return new FakeDevice (inputName, 4, 0, 1.0 / (1.0 + 80e-6), 440.0f);   // input clock 80 ppm fast
+            return lastInput = new FakeDevice (inputName, 4, 0, 1.0 / (1.0 + 80e-6), 440.0f);   // input clock 80 ppm fast
 
         return last = new FakeDevice (outputName, 0, 4, 1.0, 0.0f);
     }
 
     /** The most recently created device with outputs (where the result can be observed). */
     FakeDevice* last = nullptr;
+    FakeDevice* lastInput = nullptr;
 };
 
 } // namespace bridgerack::test

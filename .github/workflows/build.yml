@@ -27,7 +27,7 @@ jobs:
           status=$?
           cat test.log
           # Surface failures as annotations so they show up on the run page.
-          grep -E "FAIL|^[A-Za-z].*:" test.log | grep -B1 FAIL | while read -r line; do echo "::error::$line"; done
+          grep -E "FAIL|\[info\]" test.log | while read -r line; do echo "::error::$line"; done
           exit $status
 
       - name: Package

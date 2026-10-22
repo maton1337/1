@@ -480,8 +480,12 @@ void testEndToEnd (const juce::String& inputDevice, const juce::String& outputDe
     check (rack.takeInputPeak (0) > 0.4f, "channel input meter sees the signal");
 
     if (status.bridged)
-        check (status.bridge.underruns <= 1, "bridge dropouts: " + juce::String (status.bridge.underruns)
-                                              + ", drift " + juce::String (status.bridge.driftPpm, 1) + " ppm");
+    {
+        const auto& b = status.bridge;
+        std::printf ("  [info] bridge target %.0f frames, fill %.0f, ratio %.6f, input callbacks %d, output callbacks %d\n",
+                     b.targetFrames, b.fillFrames, b.ratio, fake->lastInput->getCallbacks(), fake->last->getCallbacks());
+        check (b.underruns <= 1, "bridge dropouts: " + juce::String (b.underruns) + ", drift " + juce::String (b.driftPpm, 1) + " ppm");
+    }
 
     engine.close();
 }
